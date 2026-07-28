@@ -1,0 +1,29 @@
+[project]
+name = "srmr"
+version = "0.1.0"
+description = "NR dataset and SEOBNRv5HM baseline for revisiting the merger-ringdown ansatz with symbolic regression"
+authors = [{ name = "Lorenzo Pompili", email = "Lorenzo.Pompili@nottingham.ac.uk" }]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "h5py",
+    "pandas",
+    "matplotlib",
+    "qnm",          # Kerr quasi-normal-mode frequencies
+    "tqdm",
+    "numba",        # used by the mode-mixing coefficients
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["srmr"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
