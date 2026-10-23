@@ -2,7 +2,7 @@
 
 The dataset is a single HDF5 file with the layout::
 
-    attrs: dt, spline_k, extrap
+    attrs: dt, spline_k, extrap, lower_resolution, remove_memory, csv
     params/            m1, m2, chi1, chi2, Mf, af, q, nu, dm, chi, t_peak22, name
     modes/2_2/         tau (T,), amp (N, T), phase (N, T), t_valid (N,),
                        amp0, damp0, ddamp0, phi0, omega0, domega0 (N,)

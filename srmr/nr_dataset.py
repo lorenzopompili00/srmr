@@ -142,6 +142,15 @@ def read_metadata(path: str) -> dict:
     )
 
 
+#: Strain file of the old SXS format, with one ``Extrapolated_N*.dir`` group per order.
+OLD_FORMAT_FILE = "rhOverM_Asymptotic_GeometricUnits_CoM.h5"
+
+
+def has_strain(path: str) -> bool:
+    """Whether ``path`` is a ``LevN`` directory holding the strain, in either format."""
+    return any(os.path.exists(os.path.join(path, f)) for f in ("Strain_N2.h5", OLD_FORMAT_FILE))
+
+
 def lower_resolution_path(path: str) -> str | None:
     """The same simulation at the highest resolution *below* the one in ``path``.
 
@@ -155,21 +164,16 @@ def lower_resolution_path(path: str) -> str | None:
     levels = []
     for candidate in glob.glob(os.path.join(parent, "Lev*")):
         m = re.search(r"Lev(-?\d+)$", candidate)
-        if m and int(m.group(1)) < lev and os.path.exists(
-            os.path.join(candidate, "rhOverM_Asymptotic_GeometricUnits_CoM.h5")
-        ):
+        if m and int(m.group(1)) < lev and has_strain(candidate):
             levels.append((int(m.group(1)), candidate))
     return max(levels)[1] if levels else None
 
 
-def read_modes(
-    path: str, modes: list[tuple[int, int]], extrap: str = cfg.EXTRAP_DIR
-) -> tuple[np.ndarray, dict[tuple[int, int], np.ndarray]]:
-    """Read the requested strain modes from an SXS simulation directory."""
-    fname = os.path.join(path, "rhOverM_Asymptotic_GeometricUnits_CoM.h5")
+def _read_old_format(path, modes, extrap):
+    """Old format: one ``(t, Re h, Im h)`` dataset per mode."""
     out = {}
-    with h5py.File(fname, "r") as f:
-        grp = f[extrap]
+    with h5py.File(os.path.join(path, OLD_FORMAT_FILE), "r") as f:
+        grp = f[f"Extrapolated_N{extrap}.dir"]
         t = None
         for ell, m in modes:
             data = grp[f"Y_l{ell}_m{m}.dat"][:]
@@ -177,6 +181,46 @@ def read_modes(
                 t = data[:, 0]
             out[ell, m] = data[:, 1] + 1j * data[:, 2]
     return t, out
+
+
+def _read_new_format(path, modes, extrap, remove_memory):
+    """``Strain_N2.h5``, compressed, loaded with ``sxs``.
+
+    Only N=2 is a file of its own; the other orders are groups of
+    ``ExtraWaveforms.h5`` in the same (RPDMB) format.  The memory was added when
+    the catalogue was built, starting at the relaxation time, so it is removed the
+    same way: ``J_E`` integrated from the relaxation time.
+    """
+    from sxs.waveforms import memory
+    from sxs.waveforms import rotating_paired_diff_multishuffle_bzip2 as rpdmb
+
+    if extrap == 2:
+        h = rpdmb.load(os.path.join(path, "Strain_N2.h5"))
+    else:
+        h = rpdmb.load(os.path.join(path, "ExtraWaveforms.h5", f"Strain_N{extrap}.dir"))
+    out = {lm: h.data[:, h.index(*lm)] for lm in modes}
+    if remove_memory:
+        with open(os.path.join(path, "metadata.json")) as fp:
+            t_relax = json.load(fp)["relaxation_time"]
+        mem = memory.J_E(h, integration_start_time=t_relax)
+        out = {lm: out[lm] - mem.data[:, mem.index(*lm)] for lm in modes}
+    return np.asarray(h.t), out
+
+
+def read_modes(
+    path: str,
+    modes: list[tuple[int, int]],
+    extrap: int = cfg.EXTRAP_ORDER,
+    remove_memory: bool = cfg.REMOVE_MEMORY,
+) -> tuple[np.ndarray, dict[tuple[int, int], np.ndarray]]:
+    """Read the requested strain modes from a ``LevN`` directory of an SXS simulation.
+
+    Both catalogue formats are understood.  The old one carries no memory, so
+    ``remove_memory`` only affects the new one.
+    """
+    if os.path.exists(os.path.join(path, OLD_FORMAT_FILE)):
+        return _read_old_format(path, modes, extrap)
+    return _read_new_format(path, modes, extrap, remove_memory)
 
 
 def find_peak_time(t: np.ndarray, amp: np.ndarray, window: float = 10.0) -> float:
@@ -257,12 +301,13 @@ def extract_simulation(
     t_end: float = cfg.T_END,
     dt: float = cfg.DT,
     k: int = cfg.SPLINE_K,
-    extrap: str = cfg.EXTRAP_DIR,
+    extrap: int = cfg.EXTRAP_ORDER,
+    remove_memory: bool = cfg.REMOVE_MEMORY,
 ) -> Simulation:
     """Extract the merger-ringdown data of a single SXS simulation.
 
     Args:
-        path: directory containing ``metadata.json`` and the strain HDF5 file.
+        path: the ``LevN`` directory, containing ``metadata.json`` and the strain.
         name: label for the simulation.
         modes: modes to extract; defaults to :data:`srmr.config.MODES`.
         t_start: per-mode start of the merger-ringdown, relative to the peak of
@@ -270,7 +315,8 @@ def extract_simulation(
         t_end: length of the extracted portion [M].
         dt: sampling of the output grid [M].
         k: order of the interpolating splines.
-        extrap: which extrapolation order to read, e.g. ``Extrapolated_N3.dir``.
+        extrap: which extrapolation order of the strain to read.
+        remove_memory: subtract the displacement memory (new SXS format only).
     """
     modes = list(cfg.MODES if modes is None else modes)
     t_start = {**cfg.T_START, **(t_start or {})}
@@ -282,7 +328,7 @@ def extract_simulation(
         if lm in cfg.MIXED_MODES:
             needed.add(cfg.MIXED_MODES[lm])
 
-    t, h = read_modes(path, sorted(needed), extrap)
+    t, h = read_modes(path, sorted(needed), extrap, remove_memory)
     sim = Simulation(name=name, path=path, **read_metadata(path), t_peak22=0.0)
     sim.t_peak22 = find_peak_time(t, np.abs(h[2, 2]))
 

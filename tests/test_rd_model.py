@@ -1,5 +1,7 @@
 """Checks of the standalone ringdown model and of the NR extraction."""
 
+import os
+
 import numpy as np
 import pytest
 from scipy.interpolate import InterpolatedUnivariateSpline as Spline
@@ -121,3 +123,26 @@ def test_qnm_conventions():
     assert omega > 0 and tau > 0
     assert omega == pytest.approx(0.5239751, rel=1e-5)
     assert tau == pytest.approx(1 / 0.0815126, rel=1e-5)
+
+
+# The same simulation in both SXS catalogue formats, on the AEI cluster.
+_OLD_0335 = "/work/sossokine/SimAnnex/Public/4d2sB/0011/Lev3"
+_NEW_0335 = "/work/hpfeiffer/SimulationAnnex/PublicLinks/SXS:BBH:0335/Lev3"
+
+
+@pytest.mark.skipif(
+    not (os.path.isdir(_OLD_0335) and os.path.isdir(_NEW_0335)), reason="needs the SXS annex"
+)
+def test_new_format_matches_old_once_memory_is_removed():
+    """The new-format reader, with the memory subtracted, reproduces the old files."""
+    from srmr.mismatch import mismatch
+    from srmr.nr_dataset import extract_simulation
+
+    def mm(a, b):
+        return mismatch(a.amp, a.phase - a.phase[0], b.amp, b.phase - b.phase[0], 0.1)
+
+    old = extract_simulation(_OLD_0335, modes=[(2, 2)]).mode((2, 2))
+    new = extract_simulation(_NEW_0335, modes=[(2, 2)]).mode((2, 2))
+    with_memory = extract_simulation(_NEW_0335, modes=[(2, 2)], remove_memory=False).mode((2, 2))
+    assert mm(old, new) < 1e-6
+    assert mm(old, with_memory) > 10 * mm(old, new)

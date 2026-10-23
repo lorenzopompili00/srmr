@@ -13,6 +13,7 @@ dependencies = [
     "qnm",          # Kerr quasi-normal-mode frequencies
     "tqdm",
     "numba",        # used by the mode-mixing coefficients
+    "sxs>=2026.0.0", # reads the SXS catalogue format, removes the memory
 ]
 
 [project.optional-dependencies]

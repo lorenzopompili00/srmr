@@ -21,7 +21,7 @@ git clone git@github.com:lorenzopompili00/srmr.git
 ```
 
 If you cloned without it, `git lfs install && git lfs pull` fetches the real files.
-Check: `data/nr_mrd_N2.h5` should be ~53 MB, not a ~130-byte pointer file.
+Check: `data/nr_mrd_N2.h5` should be ~70 MB, not a ~130-byte pointer file.
 
 Dependencies are pinned in `uv.lock`, so this reproduces the exact environment:
 
@@ -36,7 +36,7 @@ To refresh the pins after editing `pyproject.toml`: `uv lock && uv sync --extra 
 ## Use
 
 ```bash
-# 1. the NR datasets (~25 s each; the .h5 files are not in git, see below)
+# 1. the NR datasets (a few minutes each; already in git, see below)
 python scripts/build_dataset.py --out data/nr_mrd_N2.h5 # Default
 python scripts/build_dataset.py --extrap N3 --out data/nr_mrd_N3.h5 
 python scripts/build_dataset.py --lower-resolution --out data/nr_mrd_N2_lowres.h5 
@@ -54,7 +54,7 @@ python scripts/plot_case.py --name SXS:BBH:0335 --out data/case_200.png
 pytest
 ```
 
-The three `.h5` datasets (~53 MB each, gzip-compressed) are committed via git-lfs, so
+The three `.h5` datasets (~70 MB each, gzip-compressed) are committed via git-lfs, so
 you do not need access to the source SXS simulations. `build_dataset.py` only matters
 if you want to change the modes, the attachment time or the window — it reads the raw
 SXS directories listed in the CSV above.
@@ -92,8 +92,20 @@ and verified to reproduce it exactly). An alternative ansatz only has to expose 
 
 ## The dataset
 
-440 SXS simulations, `q` from 1 to 20 and spins to |chi| = 0.998, listed in
-`/work/lpompili/csv_files/spinning_calibs_PM.csv`.
+591 SXS simulations, `q` from 1 to 20 and spins to |chi| = 0.998, listed in
+`/work/cfoo/aligned_spin_exploration/csv_files/all_spinning.csv` (the highest resolution
+`LevN` of each, given by its `num_res` column).
+
+* The waveforms are read from the current SXS format (`LevN/Strain_N2.h5`, loaded with
+  `sxs`).  Only N=2 is a file of its own; N=3 is read from the `Strain_N3.dir` group of
+  `LevN/ExtraWaveforms.h5`.  The older `rhOverM_Asymptotic_GeometricUnits_CoM.h5` layout
+  is still understood, so old CSVs keep working.
+* The current format has the **displacement memory added**; it is subtracted again
+  (`sxs.waveforms.memory.J_E` from the relaxation time, as in `pyseobnr-toolkit`'s
+  `NRModel_SXS_AlignedSpin`), since neither SEOBNRv5 nor the old files include it.
+  `--keep-memory` skips that.  With it subtracted, the new files reproduce the old ones
+  to a (2,2) mismatch of ~4e-8, below the NR resolution error; with it kept they differ
+  by ~6e-6 (`tests/test_rd_model.py` checks this on SXS:BBH:0335).
 
 * The peak of `|h_22|` is found by root-finding on a spline derivative, so it is **not**
   quantised to the NR sampling rate (residual `d|h_22|/dt` at the recovered peak is
@@ -107,7 +119,9 @@ and verified to reproduce it exactly). An alternative ansatz only has to expose 
   together with the `(m,m)` mode it mixes with resampled onto the same grid — so the
   SEOBNRv5 mode-mixing treatment can be rebuilt for any attachment time.
 * `--extrap` and `--lower-resolution` rebuild the same simulations at a different
-  extrapolation order or resolution, if you want to check NR convergence.
+  extrapolation order or resolution, if you want to check NR convergence.  23
+  simulations have no lower resolution, so `nr_mrd_N2_lowres.h5` holds 568; pair the
+  files by `name`, not by row.
 
 ```python
 from srmr.dataset import Dataset
@@ -144,13 +158,13 @@ numerical noise, not signal — the odd-`m` modes vanish for equal masses and eq
 `eval_v5.py` reports both the full set and the set above `--min-amp-ratio` (default
 `1e-3`); use the latter.
 
-Median mismatch over the 440 simulations, 100 M window, modes above that cut:
+Median mismatch over the 591 simulations, 100 M window, modes above that cut:
 
 | mode          | (2,2)   | (2,1)   | (3,3)   | (4,4)   |
 |---------------|---------|---------|---------|---------|
-| SEOBNRv5      | 1.4e-05 | 4.9e-04 | 1.2e-03 | 2.9e-03 |
-| ansatz floor  | 5.3e-06 | 1.7e-04 | 1.8e-05 | 4.3e-04 |
-| NR resolution | 1.9e-07 | 3.6e-06 | 4.6e-06 | 3.0e-06 |
+| SEOBNRv5      | 1.3e-05 | 5.1e-04 | 1.4e-03 | 3.1e-03 |
+| ansatz floor  | 5.2e-06 | 1.7e-04 | 1.8e-05 | 4.2e-04 |
+| NR resolution | 1.3e-07 | 4.6e-06 | 6.5e-06 | 2.3e-06 |
 
 `refit_v5.py` gives the middle row: the free coefficients refitted case by case, so it
 separates the error of the *functional form* from the error of interpolating those
@@ -172,8 +186,8 @@ python scripts/eval_v5.py --modes 2,2 3,3 2,1 4,4 3,2 4,3
 | mode          | (3,2)   | (4,3)   |
 |---------------|---------|---------|
 | SEOBNRv5      | 2.3e-03 | 7.8e-03 |
-| ansatz floor  | 3.2e-04 | 3.4e-04 |
-| NR resolution | 1.8e-06 | 4.0e-06 |
+| ansatz floor  | 3.2e-04 | 3.5e-04 |
+| NR resolution | 1.5e-06 | 4.8e-06 |
 
 One convention that matters there: the phase residual is fitted **weighted by the
 amplitude**, which is what the mismatch asks for. SEOBNRv5 used uniform weights;

@@ -59,7 +59,11 @@ DT: float = 0.1
 MIXED_MODES: dict[tuple[int, int], tuple[int, int]] = {(3, 2): (2, 2), (4, 3): (3, 3)}
 
 #: Which extrapolation order of the SXS strain to read.
-EXTRAP_DIR: str = "Extrapolated_N2.dir"
+EXTRAP_ORDER: int = 2
+
+#: Subtract the displacement memory from the strain.  The current SXS format adds
+#: it to every waveform; the old ``rhOverM_*`` files, and SEOBNRv5, have none.
+REMOVE_MEMORY: bool = True
 
 #: Order of the interpolating splines used to resample and differentiate.
 SPLINE_K: int = 5

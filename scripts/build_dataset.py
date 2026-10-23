@@ -27,7 +27,7 @@ from srmr import dataset
 from srmr.cli import parse_modes, parse_overrides
 from srmr.nr_dataset import extract_simulation, lower_resolution_path
 
-DEFAULT_CSV = "/work/lpompili/csv_files/spinning_calibs_PM.csv"
+DEFAULT_CSV = "/work/cfoo/aligned_spin_exploration/csv_files/all_spinning.csv"
 
 
 def simulation_name(alternative_names: str) -> str:
@@ -40,6 +40,19 @@ def simulation_name(alternative_names: str) -> str:
         if name.startswith("SXS:BBH"):
             return name
     return names[0] if names else ""
+
+
+def simulation_path_and_name(row: pd.Series) -> tuple[str, str]:
+    """The ``LevN`` directory and the label of one CSV row.
+
+    Two CSV layouts are in use: ``metadata_path`` pointing at the ``LevN``
+    directory itself, with the labels in ``alternative_names``; or pointing at the
+    simulation directory (named after the simulation), with the level in ``num_res``.
+    """
+    path = row["metadata_path"]
+    if "num_res" in row:
+        return os.path.join(path, f"Lev{int(row['num_res'])}"), os.path.basename(path)
+    return path, simulation_name(row["alternative_names"])
 
 
 def _worker(args):
@@ -61,6 +74,8 @@ def main() -> None:
     p.add_argument("--dt", type=float, default=cfg.DT, help="output time step [M]")
     p.add_argument("--extrap", default="N2", choices=["N2", "N3", "N4"],
                    help="extrapolation order of the SXS strain")
+    p.add_argument("--keep-memory", action="store_true",
+                   help="do not subtract the displacement memory (new SXS format)")
     p.add_argument("--lower-resolution", action="store_true",
                    help="use the highest resolution below the one listed in the CSV")
     p.add_argument("--nproc", type=int, default=32, help="number of worker processes")
@@ -69,8 +84,9 @@ def main() -> None:
 
     modes = parse_modes(args.modes, cfg.MODES)
     t_start = parse_overrides(args.t_start)
-    extrap = f"Extrapolated_{args.extrap}.dir"
-    kwargs = dict(modes=modes, t_start=t_start, t_end=args.t_end, dt=args.dt, extrap=extrap)
+    extrap = int(args.extrap[1:])
+    kwargs = dict(modes=modes, t_start=t_start, t_end=args.t_end, dt=args.dt, extrap=extrap,
+                  remove_memory=not args.keep_memory)
 
     table = pd.read_csv(args.csv)
     if args.limit:
@@ -78,7 +94,7 @@ def main() -> None:
 
     jobs, no_lower = [], []
     for _, row in table.iterrows():
-        path, name = row["metadata_path"], simulation_name(row["alternative_names"])
+        path, name = simulation_path_and_name(row)
         if args.lower_resolution:
             path = lower_resolution_path(path)
             if path is None:
@@ -86,7 +102,7 @@ def main() -> None:
                 continue
         jobs.append((path, name, kwargs))
 
-    print(f"Extracting {len(jobs)} simulations, modes {modes}, {extrap}"
+    print(f"Extracting {len(jobs)} simulations, modes {modes}, {args.extrap}"
           f"{', one resolution down' if args.lower_resolution else ''}")
     if no_lower:
         print(f"  {len(no_lower)} simulations have no lower resolution available: {no_lower[:3]}...")
@@ -103,8 +119,10 @@ def main() -> None:
         t_start=t_start,
         t_end=args.t_end,
         spline_k=cfg.SPLINE_K,
-        extrap=extrap,
+        extrap=args.extrap,
         lower_resolution=args.lower_resolution,
+        remove_memory=not args.keep_memory,
+        csv=args.csv,
     )
     print(f"Wrote {len(sims)} simulations to {args.out}")
 
